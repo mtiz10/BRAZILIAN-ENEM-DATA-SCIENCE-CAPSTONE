@@ -15,6 +15,24 @@ The study implements a two-part supervised learning framework:
 
 Furthermore, this analysis defines a statistical predictive ceiling, demonstrating why highly granular individual socioeconomic metrics—currently restricted under Brazilian General Data Protection Law (LGPD)—are required to capture further writing nuances.
 
+
+## Data Source & Disclaimer
+
+### Original Primary Source
+The original, complete, and un-sampled microdata containing 4,332,944 student records from the 2024 ENEM exam is published and maintained by the **National Institute for Educational Studies and Research Anísio Teixeira (INEP)**, under the Ministry of Education (MEC) of the Federal Government of Brazil.
+
+* **Publisher**: National Institute for Educational Studies and Research Anísio Teixeira (INEP)
+* **Official Data Portal**: [INEP Microdata Portal](https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/enem)
+* **Direct Zip Download URL**: [Official INEP 2024 ENEM ZIP](https://download.inep.gov.br/microdados/microdados_enem_2024.zip)
+
+### Sampled Dataset Disclaimer
+To comply with GitHub's file size limits (maximum 100 MB per file) and ensure a reproducible, fast-running execution for peer grading, this repository hosts a **5% random sample** of the original `RESULTADOS_2024.csv` dataset. 
+
+This sample was extracted using a reproducible random seed (`set.seed(2024)`) in R. No academic, geographic, or administrative variables were altered during this process. This allows peer reviewers to download, extract, and execute the entire machine learning pipeline in less than 10 seconds.
+
+
+
+
 ---
 
 ## Performance Summary
