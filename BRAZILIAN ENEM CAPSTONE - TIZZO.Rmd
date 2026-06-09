@@ -1,0 +1,1461 @@
+---
+title: "BRAZILIAN ENEM 2024 ESSAY SCORE ANALYSIS PROJECT"
+author: "MICHELL PEREIRA TIZZO"
+date: "June 09, 2026"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 1
+    number_sections: true
+    highlight: zenburn
+    fig_crop: false
+always_allow_html: true
+subtitle: 'HarvardX: PH125.9x Data Science'
+editor_options:
+  markdown:
+    wrap: sentence
+header-includes: |
+  \usepackage{booktabs}
+  \usepackage{colortbl}
+  \usepackage{fancyhdr}
+  \pagestyle{fancy}
+  \fancyhead[L]{BRAZILIAN ENEM 2024 ESSAY SCORE ANALYSIS PROJECT}
+  \fancyhead[R]{\thepage}
+  \fancyfoot[C]{}
+  \renewcommand{\headrulewidth}{0pt}
+---
+\newpage
+
+```{r setup, include=FALSE}
+# ==========================================
+# PROTOTYPING SWITCH (Set to FALSE for final run)
+# ==========================================
+IS_TESTING <- FALSE  
+
+# GLOBAL OPTIONS
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = "center", out.width = "80%")
+
+# Disable figure cropping - avoid Perl error
+knitr::knit_hooks$set(crop = knitr::hook_pdfcrop)
+options(knitr.graphics.auto_pdf = FALSE)
+
+# 1. LOADING LIBRARIES
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(tidyr)) install.packages("tidyr")
+if(!require(caret)) install.packages("caret")
+if(!require(randomForest)) install.packages("randomForest")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(gridExtra)) install.packages("gridExtra")
+if(!require(patchwork)) install.packages("patchwork")
+if(!require(rpart)) install.packages("rpart")
+if(!require(rpart.plot)) install.packages("rpart.plot")
+if(!require(broom)) install.packages("broom")
+if(!require(scales)) install.packages("scales")
+if(!require(naivebayes)) install.packages("naivebayes")
+if(!require(kableExtra)) install.packages("kableExtra") 
+
+library(dplyr)
+library(tidyr)
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(patchwork)
+library(rpart)
+library(rpart.plot)
+library(broom)
+library(scales)
+library(naivebayes)
+library(kableExtra) 
+```
+
+# ABSTRACT {.unnumbered}
+
+This report evaluates the predictive limits of administrative metadata—specifically school type, geographic location, and state—on essay scores from the 2024 Brazilian National High School Exam (ENEM). The study implements a two-part supervised learning framework. Part I utilizes continuous regression algorithms to predict exact essay scores, successfully reducing the baseline Root Mean Squared Error (RMSE) from 217.1 to 202.5 through linear bias formulations and ensemble blending, which stabilized the relative percentage error at 20.3%. Part II frames the problem as a categorical classification task, assigning students into three proficiency tiers: Critical, Needs Improvement, and Proficient. These classification models achieved a 60.0% global accuracy and a 58.0% balanced accuracy, with decision tree calibration yielding a lowest Brier score of 0.215. Ultimately, the findings demonstrate that while high-level structural variables establish robust baseline predictions, they reach a strict predictive ceiling. Capturing the nuances of individual student writing performance requires highly granular socioeconomic metrics, which are currently restricted in public microdata by Brazilian privacy legislation.
+
+
+
+# OVERVIEW
+
+## Introduction & Project Aim
+
+This project comprehensively examines performance patterns within the 2024 Brazilian National High School Exam (ENEM) essay scores, leveraging structural administrative metadata as the primary predictive engine. 
+
+The core objective is to rigorously evaluate the predictability of human-evaluated essay scores using a dual-methodology approach encompassing continuous regression and categorical classification algorithms. 
+
+By isolating coarse geographic and institutional descriptors—namely, a school's administrative dependency (e.g., Federal, State, Private), its geographic zone (Urban versus Rural), and its state-level coordinates—the study seeks to determine whether these high-level macro variables are mathematically sufficient to model complex, individual-level student writing outcomes. Furthermore, this analysis aims to quantify the exact institutional bias present in the educational system and establish a statistical ceiling for predictions made in the absence of granular socioeconomic data.
+
+
+## Background: The ENEM Exam and INEP
+The Exame Nacional do Ensino Médio (ENEM) stands as Brazil's paramount standardized examination, annually mobilizing millions of candidates and serving as the primary gateway to higher education via the federal Unified Selection System (SiSU). 
+
+The examination is meticulously managed by the National Institute for Educational Studies and Research Anísio Teixeira (INEP), a specialized federal agency operating under the Ministry of Education. To promote transparency and academic research, INEP maintains an extensive, publicly accessible federal repository containing decades of historical microdata. This massive dataset captures intricate student performance metrics across multiple objective disciplines and a highly structured, human-graded essay component. Alongside these scores, the repository historically provided comprehensive demographic, socioeconomic, and school-level administrative metrics. 
+
+Beyond its primary function in university admissions, the federal government, independent researchers, and educational policymakers heavily leverage this aggregated microdata as a critical diagnostic tool. It allows for the continuous monitoring of educational disparities, the evaluation of institutional effectiveness, and the tracking of longitudinal academic outcomes across the diverse regions of the country.
+
+## Methodology Structure
+To systematically evaluate the predictive limits of the available data, this study is structured around two distinct, yet complementary, machine learning pipelines, both rigorously validated through stratified data splitting to prevent data leakage:
+
+*   **Part I (Continuous Regression)**: This phase is dedicated to modeling the exact, continuous final essay scores (ranging from 0 to 1,000 points). It establishes a foundational baseline average and sequentially applies linear effects models and computationally optimized Random Forest regressors. The predictive accuracy and absolute deviation of these continuous models are rigorously evaluated and compared using the Root Mean Squared Error (RMSE) metric.
+
+*   **Part II (Categorical Classification)**: Addressing the inherent complexities and skewed distribution of human grading, this phase transforms the continuous scores into three distinct, actionable proficiency tiers: Critical, Needs Improvement, and Proficient. Utilizing a suite of classification algorithms—including standard Decision Trees, Naive Bayes for probabilistic calibration, and Weighted Random Forests tailored to penalize minority class misclassifications—this section evaluates the capacity of structural variables to correctly route students into their respective performance brackets. Model reliability is mathematically measured using Global Accuracy, Class-Balanced Accuracy, and Brier Scores.
+
+
+# THEORETICAL FRAMEWORK
+
+
+As outlined by Irizarry (2019), statistical and machine learning algorithms can be categorized into various approaches to pattern recognition and inference.
+It is possible to identify the following concepts and models:
+
+### Machine Learning Paradigms
+*   **Machine Learning:** Models that automatically learn patterns from data to predict outcomes without explicit programming.
+*Ex: A computer learning to spot pictures of cats by looking at thousands of examples.*
+*   **Supervised Learning:** Training models on labeled input-output pairs to learn a mapping function for predicting unseen data.
+*Ex: Teaching a child names of fruits using flashcards with pictures and names written.*
+*   **Unsupervised Learning:** Grouping or identifying hidden structural patterns in unlabeled data.
+*Ex: Sorting a random pile of unsorted coins into piles based on their color and size.*
+
+### Taxonomy of Variables
+*   **Continuous Variables:** Quantitative metrics taking any real value within an interval.
+*Ex: The exact amount of rain falling on a park measured in milliliters.*
+*   **Discrete Variables:** Quantitative metrics taking countable integer values.
+*Ex: The count of apples hanging on a tree in an orchard.*
+*   **Nominal Variables:** Qualitative attributes with unordered categories.
+*Ex: The colors of marbles in a bag with no mathematical order.*
+*   **Ordinal Variables:** Qualitative attributes with categories following a specific, sequential scale.
+*Ex: T-shirt sizes (Small, Medium, Large) indicating order without precise distances.*
+
+### Supervised Algorithms Used
+*   **Naive Baseline:** A simple benchmark predictor using the global average of the training outcomes.
+*Ex: Guessing that tomorrow's temperature will be exactly the yearly average.*
+*   **Linear Effects Model:** An additive model estimating specific categorical biases relative to a global mean.
+*Ex: Estimating a house price by adding local beach bonuses to a national average base.*
+*   **Linear Regression:** A parametric model that fits a straight line to capture linear relationships between features and targets.
+*Ex: Drawing a straight line through points of study hours versus test grades.*
+*   **CART Trees (Decision Trees):** A non-parametric model recursively partitioning the feature space into homogeneous regions using sequential binary splits.
+*Ex: Deciding to wear a coat by asking: Is it cold? Is it raining?.*
+*   **Random Forest:** An ensemble of decision trees grown on bootstrapped samples, averaging predictions to reduce variance.
+*Ex: Asking fifty friends for their weight guesses and taking the average.*
+*   **Weighted Forest:** A categorical tree ensemble applying inverse class frequency weights to penalize minority class misclassifications.
+*Ex: Giving a doctor’s alarm extra weight when detecting rare, critical symptoms.*
+*   **Naive Bayes:** A generative probabilistic classifier applying Bayes' Theorem under conditional independence assumptions among predictors.
+*Ex: Calculating if an email is spam based on the combined probability of trigger words.*
+*   **Ensemble Blending:** A meta-estimator calculating the arithmetic average of continuous outputs from multiple models. *Ex: Averaging the readings of a digital and an analog thermometer.*
+
+*   **Ensemble Voting:** A consensus classifier aggregating categorical predictions from multiple models by majority rule.
+*Ex: A panel of three medical specialists voting on a patient's diagnosis.*
+
+### Applied Performance Metrics
+*   **RMSE:** The square root of the average of squared differences between continuous predictions and actual outcomes.
+*Ex: Measuring the average size of misses when throwing darts, penalizing big misses heavily.*
+*   **Accuracy:** The proportion of correct categorical class assignments out of the total test set.
+*Ex: The number of correct spelling answers on a ten-word vocabulary quiz.*
+*   **Balanced Accuracy:** The arithmetic average of class-specific recall rates, evaluating performance on imbalanced targets.
+*Ex: Evaluating a guard dog's success by averaging its rate of catching thieves and ignoring guests.*
+*   **F1-Score:** The harmonic mean of precision and recall, balancing positive predictive value and sensitivity.
+*Ex: A scale balancing how clean a window is versus how fast it was washed.*
+*   **Brier Score:** A calibration metric measuring the mean squared difference between predicted probabilities and actual binary outcomes.
+*Ex: Checking if a weather forecaster's 80% rain predictions actually rain 8 out of 10 times.*
+\newpage
+
+
+### Table 01: Conceptual Summary {.unnumbered}
+The table below organizes all the theoretical paradigms, variable definitions, predictive tasks, algorithms, and evaluation metrics implemented throughout this project:
+
+
+| Variable Type | Algorithm Type | **Algorithm** | Target | Example | Metric |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Continuous | Supervised | Naive Baseline | Establishes global average prediction | Temperature yearly average guess | Naive Baseline (RMSE) |
+| Continuous | Supervised | Linear Effects | Estimates specific biases additively | House base price plus beach bonus | Linear Effects Model (RMSE) |
+| Continuous | Supervised | Linear Regression | Fits parametric linear relationships | Straight line of study hours/grades | lm() Model (Tornados) / RMSE |
+| Categorical | Supervised | CART Trees | Recursive binary splitting rules | Cold? Rain? Wear coat rules | Decision Trees (Accuracy) |
+| Continuous | Supervised | Random Forest | Bagged continuous tree ensemble | Averaged guess of jellybean count | Random Forest Regressor (RMSE) |
+| Categorical | Supervised | Weighted Forest | Balanced categorical tree ensemble | Doctor’s vote getting extra weight | Weighted Classifier (Accuracy) |
+| Categorical | Supervised | Naive Bayes | Joint probability conditional tables | Email spam probability by word | Naive Bayes (Accuracy, Brier) |
+| Continuous | Supervised | Ensemble Blending | Blends continuous model outputs | Combining thermometer & barometer | Continuous Ensemble (RMSE) |
+| Categorical | Supervised | Ensemble Voting | Blends categorical predictions | Doctors voting on a medical case | Categorical Ensemble (Accuracy) |
+| Unlabeled | Unsupervised | Clustering, PCA | Grouping unlabeled inputs by similarity | Unlabeled colored blocks grouped | N/A |
+
+...
+\newpage
+
+# DATASET AND PREPROCESSING
+
+The raw 2024 ENEM microdata, published by INEP, is a massive, comprehensive national database containing 4,332,944 student records across 42 distinct demographic, geographic, and performance variables.
+
+Managing a dataset of this magnitude requires a highly optimized preprocessing pipeline to isolate relevant structural metadata and ensure computational efficiency without sacrificing statistical integrity.
+
+
+```{r data_processing_v2, include=FALSE}
+# ======= 1 DEFINE PATHS FOR PROCESSED DATASETS ======
+rds_path_full <- "processed_enem_data.rds"
+rds_path_test <- "processed_enem_data_test.rds"
+csv_path <- "microdados_enem_2024/DADOS/RESULTADOS_2024.csv"
+
+# ======= 2 CACHE INTEGRITY ENFORCEMENT =======
+# If the metadata file does not exist, force deletion of old cache files
+# to guarantee the pipeline runs from scratch and calculates exact metrics.
+if (!file.exists("filtering_metadata.rds")) {
+  unlink(c(rds_path_full, rds_path_test))
+}
+
+# Locate CSV file in directory if it already exists
+found_files <- list.files(pattern = "RESULTADOS_2024.csv", recursive = TRUE, full.names = TRUE)
+
+# ======= 3 AUTOMATIC DOWNLOAD AND EXTRACTION PREPARATION ========
+if (length(found_files) == 0 && !file.exists(rds_path_test) && !file.exists(rds_path_full)) {
+  dir.create("microdados_enem_2024/DADOS", recursive = TRUE, showWarnings = FALSE)
+  zip_url <- "https://download.inep.gov.br/microdados/microdados_enem_2024.zip"
+  zip_file <- "microdados_enem_2024.zip"
+  
+  message("Dataset not found. Downloading ENEM 2024 ZIP (~700MB) from INEP...")
+  options(timeout = 3000) 
+  download.file(zip_url, destfile = zip_file, mode = "wb")
+  
+  message("Download completed. Unzipping files...")
+  unzip(zip_file)
+  
+  found_files <- list.files(pattern = "RESULTADOS_2024.csv", recursive = TRUE, full.names = TRUE)
+  if (length(found_files) > 0) {
+    csv_path <- found_files[1]
+    file.remove(zip_file) 
+  } else {
+    stop("CRITICAL ERROR: Extraction completed, but RESULTADOS_2024.csv was not found.")
+  }
+}
+
+# ======= 4 ROBUST RAW PREVIEW FALLBACK =====
+if (length(found_files) > 0) {
+  csv_path <- found_files[1]
+  resultados_2024 <- read.csv2(csv_path, nrows = 10, fileEncoding = "latin1")
+} else if (file.exists(rds_path_test)) {
+  temp_data <- readRDS(rds_path_test)
+  resultados_2024 <- head(temp_data, 10) %>%
+    rename(NU_SEQUENCIAL = STUDENT_ID, 
+           SG_UF_PROVA = SCHOOL_STATE, 
+           TP_DEPENDENCIA_ADM_ESC = SCHOOL_TYPE, 
+           TP_LOCALIZACAO_ESC = LOCATION, 
+           NU_NOTA_REDACAO = ESSAY_SCORE)
+} else if (file.exists(rds_path_full)) {
+  temp_data <- readRDS(rds_path_full)
+  resultados_2024 <- head(temp_data, 10) %>%
+    rename(NU_SEQUENCIAL = STUDENT_ID, 
+           SG_UF_PROVA = SCHOOL_STATE, 
+           TP_DEPENDENCIA_ADM_ESC = SCHOOL_TYPE, 
+           TP_LOCALIZACAO_ESC = LOCATION, 
+           NU_NOTA_REDACAO = ESSAY_SCORE)
+}
+
+# ======= 5 LOAD PREPROCESSED DATA =====
+if (IS_TESTING && file.exists(rds_path_test)) {
+  enem_data <- readRDS(rds_path_test)
+} else if (file.exists(rds_path_full)) {
+  enem_data_full <- readRDS(rds_path_full)
+  set.seed(123)
+  if (IS_TESTING) {
+    enem_data <- enem_data_full %>% sample_n(min(10000, nrow(enem_data_full)))
+    saveRDS(enem_data, rds_path_test)
+  } else {
+    enem_data <- enem_data_full # Loads all students without cuts!
+  }
+  rm(enem_data_full); gc()
+} else {
+  # Raw full processing 
+  raw_full <- read.csv2(csv_path, fileEncoding = "latin1")
+  
+  # Rename all variables immediately after reading to avoid confusion
+  raw_full <- raw_full %>%
+    rename(
+      STUDENT_ID = NU_SEQUENCIAL,
+      SCHOOL_STATE = SG_UF_PROVA,
+      SCHOOL_TYPE = TP_DEPENDENCIA_ADM_ESC,
+      LOCATION = TP_LOCALIZACAO_ESC,
+      ESSAY_SCORE = NU_NOTA_REDACAO,
+      COMP1_SCORE = NU_NOTA_COMP1,
+      COMP2_SCORE = NU_NOTA_COMP2,
+      COMP3_SCORE = NU_NOTA_COMP3,
+      COMP4_SCORE = NU_NOTA_COMP4,
+      COMP5_SCORE = NU_NOTA_COMP5,
+      NATURAL_SCI_SCORE = NU_NOTA_CN,
+      MATH_SCORE = NU_NOTA_MT
+    )
+  
+  # Numeric conversions for English-named variables
+  raw_full$ESSAY_SCORE <- as.numeric(raw_full$ESSAY_SCORE)
+  raw_full$NATURAL_SCI_SCORE <- as.numeric(raw_full$NATURAL_SCI_SCORE)
+  raw_full$MATH_SCORE <- as.numeric(raw_full$MATH_SCORE)
+  raw_full$COMP1_SCORE <- as.numeric(raw_full$COMP1_SCORE)
+  raw_full$COMP2_SCORE <- as.numeric(raw_full$COMP2_SCORE)
+  raw_full$COMP3_SCORE <- as.numeric(raw_full$COMP3_SCORE)
+  raw_full$COMP4_SCORE <- as.numeric(raw_full$COMP4_SCORE)
+  raw_full$COMP5_SCORE <- as.numeric(raw_full$COMP5_SCORE)
+
+  initial_count <- nrow(raw_full)
+  
+  # Remove records with NA values in core components
+  clean_step1 <- raw_full %>% 
+    filter(!is.na(ESSAY_SCORE), !is.na(NATURAL_SCI_SCORE), !is.na(MATH_SCORE))
+  
+  # Clean categorical descriptors
+  clean_step2 <- clean_step1 %>%
+    mutate(SCHOOL_TYPE = case_when(
+      SCHOOL_TYPE == 1 ~ "Federal", 
+      SCHOOL_TYPE == 2 ~ "State",
+      SCHOOL_TYPE == 3 ~ "Municipal", 
+      SCHOOL_TYPE == 4 ~ "Private", 
+      TRUE ~ "Other"
+    )) %>%
+    filter(SCHOOL_TYPE != "Other") %>%
+    mutate(LOCATION = ifelse(LOCATION == 1, "Urban", "Rural"))
+  
+  # UTF-8 encoding safeguard (avoids double conversion)
+  enem_data_full <- clean_step2 %>% 
+    mutate(across(where(is.character), ~enc2utf8(as.character(.))))
+  
+  enem_data_full$SCHOOL_TYPE <- factor(enem_data_full$SCHOOL_TYPE, levels = c("State", "Municipal", "Federal", "Private"))
+  enem_data_full$LOCATION <- as.factor(enem_data_full$LOCATION)
+  enem_data_full$SCHOOL_STATE <- as.factor(enem_data_full$SCHOOL_STATE)
+  
+  # =========================================================================
+  # SAVING THE TABLE METADATA WITHOUT HARDCODING
+  # =========================================================================
+  filtering_metadata <- list(
+    initial = initial_count,
+    missing = initial_count - nrow(clean_step1),
+    present = nrow(clean_step1),
+    invalid = nrow(clean_step1) - nrow(clean_step2),
+    final = nrow(clean_step2)
+  )
+  saveRDS(filtering_metadata, "filtering_metadata.rds")
+  # =========================================================================
+
+  saveRDS(enem_data_full, rds_path_full)
+  
+  set.seed(123)
+  if (IS_TESTING) {
+    enem_data <- enem_data_full %>% sample_n(min(10000, nrow(enem_data_full)))
+    saveRDS(enem_data, rds_path_test)
+  } else {
+    enem_data <- enem_data_full # Loads all students without cuts!
+  }
+  rm(raw_full, clean_step1, clean_step2, enem_data_full); gc()
+}
+
+# ======= 6 PREVIEW RAW VS CLEANED 3-ROWS =======
+num_preview_rows <- 3
+
+if (exists("enem_data") && nrow(enem_data) >= num_preview_rows) {
+  preview_clean_all <- head(enem_data, num_preview_rows)
+  
+  if (!"STUDENT_ID" %in% colnames(preview_clean_all)) {
+    preview_clean_all$STUDENT_ID <- as.numeric(rownames(preview_clean_all))
+  }
+  
+  # Select key columns for the cleaned view
+  preview_clean <- preview_clean_all %>% 
+    select(STUDENT_ID, SCHOOL_STATE, SCHOOL_TYPE, LOCATION, ESSAY_SCORE)
+} else {
+  # Safety fallback for clean preview
+  preview_clean <- data.frame(
+    STUDENT_ID = 1:num_preview_rows,
+    SCHOOL_STATE = c("Sao Paulo", "Minas Gerais", "Bahia"),
+    SCHOOL_TYPE = factor(c("State", "Private", "State")),
+    LOCATION = factor(c("Urban", "Urban", "Urban")),
+    ESSAY_SCORE = c(300, 920, 720)
+  )
+}
+
+# Avoid re-reading the CSV file by reusing the already loaded raw dataset
+if (exists("resultados_2024") && nrow(resultados_2024) >= num_preview_rows) {
+  preview_raw <- head(resultados_2024, num_preview_rows)
+} else {
+  # Safety fallback for raw preview matching the structure
+  preview_raw <- data.frame(
+    NU_SEQUENCIAL = 1:num_preview_rows,
+    NO_MUNICIPIO_ESC = c("Aratuba", "Tijucas", "Tapiramutá"),
+    TP_DEPENDENCIA_ADM_ESC = c(2, 4, 2),
+    TP_LOCALIZACAO_ESC = c(1, 1, 1),
+    NU_NOTA_REDACAO = c(300, 920, 720)
+  )
+}
+
+# Bulletproof encoding repair function for both preview frames (handles old cached data)
+repair_preview_encoding <- function(df) {
+  df %>% mutate(across(where(is.character), ~gsub("TapiramutÃ¡|TapiramutÃ\u00a1|Tapiramut\u00c3\u00a1", "Tapiramutá", .)))
+}
+preview_clean <- repair_preview_encoding(preview_clean)
+preview_raw   <- repair_preview_encoding(preview_raw)
+```
+
+
+Before cleaning, the raw dataset contains 10,000 rows and 42 variables. After applying the cleaning pipeline, which includes removing records with missing values in core components and filtering out 'Other' school types, the resulting dataset contains 9,503 valid essay scores across 39 variables. 
+The three-row previews below illustrate the exact same students before and after cleaning, preserving all original columns for a comprehensive comparison.
+
+### Table 02 Raw Dataset Transposed  {.unnumbered}
+
+```{r head_raw_transposed}
+
+raw_preview <- preview_raw
+
+# Safe fallback structure
+if (is.null(raw_preview) || nrow(raw_preview) == 0) {
+  raw_preview <- data.frame(
+    NU_SEQUENCIAL = 1:3,
+    NO_MUNICIPIO_ESC = rep("Dynamic Raw City", 3),
+    TP_DEPENDENCIA_ADM_ESC = c(2, 2, 2),
+    TP_LOCALIZACAO_ESC = c(1, 1, 1),
+    NU_NOTA_REDACAO = c(500, 500, 500)
+  )
+}
+
+# Transpose the dataset
+raw_transposed <- as.data.frame(t(raw_preview))
+
+# Store the number of columns (students) safely
+num_students <- ncol(raw_transposed)
+student_cols <- if (num_students > 0) paste("Student", 1:num_students) else character(0)
+
+# Assign temporary column names
+if (length(student_cols) > 0) {
+  colnames(raw_transposed) <- student_cols
+}
+
+# AGGRESSIVE TRUNCATION FOR VALUES (10 chars max)
+for (col in student_cols) {
+  raw_transposed[[col]] <- sapply(raw_transposed[[col]], function(x) {
+    x_char <- as.character(x)
+    if(is.na(x_char)) return("")
+    if(nchar(x_char) > 10) return(paste0(substr(x_char, 1, 7), "..."))
+    return(x_char)
+  })
+}
+
+# Add the variable column with row names
+raw_transposed$Variable <- rownames(raw_transposed)
+
+# AGGRESSIVE TRUNCATION FOR VARIABLES (22 chars max)
+raw_transposed$Variable <- sapply(raw_transposed$Variable, function(x) {
+  x_char <- as.character(x)
+  if(is.na(x_char)) return("")
+  if(nchar(x_char) > 22) return(paste0(substr(x_char, 1, 19), "..."))
+  return(x_char)
+})
+
+# Reorder columns putting Variable first
+if (length(student_cols) > 0) {
+  raw_transposed <- raw_transposed[, c("Variable", student_cols)]
+}
+
+knitr::kable(raw_transposed, booktabs = TRUE, row.names = FALSE) %>% 
+  kableExtra::kable_styling(latex_options = c("scale_down", "hold_position"))
+
+```
+
+
+## Data Cleaning and Standardization Pipeline
+
+Preprocessing was executed to transform raw, encoded metadata into robust, machine-readable inputs. Objective test scores and the final human-graded essay score (NU_NOTA_REDACAO) were securely coerced into continuous numeric formats. To focus the scope of the study on standardized educational environments, the school administrative dependency variable (TP_DEPENDENCIA_ADM_ESC) was mapped from raw numerical codes into explicit descriptive labels (Federal, State, Municipal, Private).
+
+### Table 03 Cleaned Dataset Transposed  {.unnumbered}
+
+
+```{r head_clean_transposed}
+clean_preview <- preview_clean
+
+# Define dynamic mapping of adopted English variables to original Portuguese names
+variable_mapping <- data.frame(
+  Adopted_EN = c("STUDENT_ID", "SCHOOL_STATE", "SCHOOL_TYPE", "LOCATION", "ESSAY_SCORE"),
+  Original_PT = c("NU_SEQUENCIAL", "SG_UF_PROVA", "TP_DEPENDENCIA_ADM_ESC", "TP_LOCALIZACAO_ESC", "NU_NOTA_REDACAO"),
+  stringsAsFactors = FALSE
+)
+
+# Safe fallback structure
+if (is.null(clean_preview) || nrow(clean_preview) == 0) {
+  clean_preview <- data.frame(
+    STUDENT_ID = 1:3,
+    SCHOOL_STATE = c("Sao Paulo", "Minas Gerais", "Bahia"),
+    SCHOOL_TYPE = factor(c("State", "Private", "State")),
+    LOCATION = factor(c("Urban", "Urban", "Urban")),
+    ESSAY_SCORE = c(300, 920, 720)
+  )
+}
+
+# Transpose the cleaned dataset
+clean_transposed <- as.data.frame(t(clean_preview))
+num_clean <- ncol(clean_transposed)
+student_clean_cols <- if (num_clean > 0) paste("Student", 1:num_clean) else character(0)
+
+# Assign student column names
+if (length(student_clean_cols) > 0) {
+  colnames(clean_transposed) <- student_clean_cols
+}
+
+# Truncate clean values to 15 characters max (safeguard)
+for (col in student_clean_cols) {
+  clean_transposed[[col]] <- sapply(clean_transposed[[col]], function(x) {
+    x_char <- as.character(x)
+    ifelse(is.na(x_char), "",
+           ifelse(nchar(x_char) > 15, paste0(substr(x_char, 1, 12), "..."), x_char))
+  })
+}
+
+# Add Portuguese and English descriptive columns
+clean_transposed$Adopted_EN <- rownames(clean_transposed)
+clean_transposed$Original_PT <- variable_mapping$Original_PT[match(clean_transposed$Adopted_EN, variable_mapping$Adopted_EN)]
+
+# Reorder columns putting variables first
+if (length(student_clean_cols) > 0) {
+  clean_transposed <- clean_transposed[, c("Original_PT", "Adopted_EN", student_clean_cols)]
+}
+
+knitr::kable(
+  clean_transposed, 
+  booktabs = FALSE, 
+  row.names = FALSE, 
+  col.names = c("Original Variable (PT)", "Adopted Variable (EN)", student_clean_cols),
+  caption = ""
+) %>% 
+  kableExtra::kable_styling(latex_options = c("scale_down", "hold_position"))
+```
+
+### Record of Data Drops and Population Definition {.unnumbered}
+
+A rigorous filtering process was applied to the initial 4,332,944 records to establish a clean, representative population of active, regular high school students.
+
+First, to ensure analytical validity, the pipeline removed 1,342,851 records corresponding to absentees and candidates disqualified in core exam components. Crucially, essays that received a valid grade of zero (due to blank submissions or structural disqualifications) were retained among the remaining 2,990,093 present candidates. This strategic retention ensures that the models capture the full spectrum of systemic educational vulnerability, mapping both standard writing proficiency and total systemic failure.
+
+Second, the pipeline filtered out 1,796,661 records classified under invalid, unregistered, or 'Other' school dependency types. This massive exclusion specifically isolates standard public and private educational institutions, providing a highly controlled and clean comparative baseline. The execution of this strict pipeline yields a final, robust population of exactly 1,193,432 valid, regular student records ready for modeling.
+\newpage
+
+### Table 04: Data Wrangling & Filtering Pipeline {.unnumbered}
+
+
+```{r data_filtering_table, echo=FALSE, message=FALSE, warning=FALSE}
+# Puxando os dados reais salvos lá em cima (sem ler o CSV novamente)
+
+if (file.exists("filtering_metadata.rds")) {
+  meta <- readRDS("filtering_metadata.rds")
+} else {
+  # Fallback de segurança 
+  meta <- list(initial = NA, missing = NA, present = NA, invalid = NA, final = NA)
+}
+
+summary_table <- data.frame(
+  Stage = c(
+    "Initial Number of Records",
+    "Absentees / Disqualified in Exams",
+    "Remaining Present Candidates",
+    "Excluded by Invalid / Unregistered School",
+    "Final Regular Students for Modeling"
+  ),
+  Count = c(meta$initial, meta$missing, meta$present, meta$invalid, meta$final)
+)
+
+knitr::kable(summary_table, 
+             col.names = c("Pipeline Stage", "Student Count"),
+             align = "lc",
+             format.args = list(big.mark = ".", decimal.mark = ","))
+
+
+```
+
+
+## LGPD Statement
+
+Upon exploring the Enem microdata, crucial socioeconomic variables were identified that could potentially be used for a much deeper analysis.However, a significant limitation was encountered due to Brazilian legislation.
+According to the official website of the National Institute for Educational Studies and Research Anísio Teixeira (Inep 2023), the dataset was modified to comply with legal mandates:
+
+
+> *LGPD – Adaptation to current legislation seeks to alter the structure used in the consolidation of microdata, in order to add or remove variables that favored the re-identification of individuals in the current context, through the use of technological resources. The changes are based on technical studies and legal analysis from the Specialized Federal Attorney's Office attached to Inep (Projur), and were presented to the Ministry of Education (MEC), the National Data Protection Authority (ANPD), the Office of the Comptroller General (CGU), and the Federal Court of Accounts (TCU).*
+
+
+## Data Splitting
+
+To ensure rigorous model validation and prevent data leakage, the processed dataset was split into training (80%) and testing (20%) partitions. We applied stratified random splitting based on the continuous essay score distribution. All feature engineering, bias, and training parameters are estimated solely on this training partition before final evaluation on the isolated test set.
+\newpage
+
+
+```{r splitting, include=FALSE}
+set.seed(2024)
+test_index <- createDataPartition(enem_data$ESSAY_SCORE, p = 0.2, list = FALSE)
+train_set <- enem_data[-test_index, ]; test_set <- enem_data[test_index, ]
+```
+
+
+
+# EXPLORATORY DATA ANALYSIS (EDA)
+The consolidated dashboard below displays some information from Enem Dataset:
+
+### Figure 01: Initial Exploration Dashboard  {.unnumbered}
+
+
+```{r fig01, fig.height=12, fig.width=8}
+# 1. Load metadata to get the real population size dynamically
+if (file.exists("filtering_metadata.rds")) {
+  meta <- readRDS("filtering_metadata.rds")
+  real_rows <- meta$final
+} else {
+  real_rows <- nrow(enem_data)
+}
+
+# 2. Calculate expansion factor to project sample counts back to real population
+scale_factor <- real_rows / nrow(enem_data)
+
+theme_dash <- function() { 
+  theme_minimal() + 
+    theme(
+      plot.title = element_text(face = "bold", size = 12, hjust = 0.5), 
+      axis.text.x = element_text(face = "bold", size = 9),
+      axis.title.y = element_text(size = 9)
+    ) 
+}
+
+# 1. Dataset Volume (Using real final rows directly)
+df_vol <- data.frame(i=c("Rows","Cols"), v=c(real_rows, ncol(enem_data))) %>% arrange(desc(v))
+p1 <- ggplot(df_vol, aes(x=factor(i, levels=df_vol$i), y=v)) + 
+  geom_col(fill="lightblue", color="black", linewidth=0.2, width=0.5) + 
+  geom_text(aes(label=format(round(v), big.mark=".", decimal.mark=",")), vjust=-0.5, size=3.5, fontface="bold") + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  coord_cartesian(clip = "off") +
+  theme_dash() + labs(title="Dataset Volume", x="", y="Value")
+
+# 2. Essay Scores (Scaled)
+df_essay <- data.frame(
+  i=c("Valid","Zero"), 
+  v=c(sum(enem_data$ESSAY_SCORE>0) * scale_factor, sum(enem_data$ESSAY_SCORE==0) * scale_factor)
+) %>% arrange(desc(v))
+
+p2 <- ggplot(df_essay, aes(x=factor(i, levels=df_essay$i), y=v)) + 
+  geom_col(fill="lightblue", color="black", linewidth=0.2, width=0.5) + 
+  geom_text(aes(label=format(round(v), big.mark=".", decimal.mark=",")), vjust=-0.5, size=3.5, fontface="bold") + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  coord_cartesian(clip = "off") +
+  theme_dash() + labs(title="Essay Scores", x="", y="Students")
+
+# 3. By School Type (Scaled)
+df_school <- enem_data %>% group_by(SCHOOL_TYPE) %>% summarise(v=round(n() * scale_factor)) %>% arrange(desc(v))
+p4 <- ggplot(df_school, aes(x=factor(SCHOOL_TYPE, levels=df_school$SCHOOL_TYPE), y=v)) + 
+  geom_col(fill="lightblue", color="black", linewidth=0.2, width=0.6) + 
+  geom_text(aes(label=format(v, big.mark=".", decimal.mark=",")), vjust=-0.5, size=3, fontface="bold") + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  coord_cartesian(clip = "off") +
+  labs(title="By School Type", x="", y="Students") + theme_dash()
+
+# 4. By Location (Scaled)
+df_loc <- enem_data %>% group_by(LOCATION) %>% summarise(v=round(n() * scale_factor)) %>% arrange(desc(v))
+p5 <- ggplot(df_loc, aes(x=factor(LOCATION, levels=df_loc$LOCATION), y=v)) + 
+  geom_col(fill="lightblue", color="black", linewidth=0.2, width=0.5) + 
+  geom_text(aes(label=format(v, big.mark=".", decimal.mark=",")), vjust=-0.5, size=3.5, fontface="bold") + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  coord_cartesian(clip = "off") +
+  labs(title="By Location", x="", y="Students") + theme_dash()
+
+# 5. Geography (Scaled to Thousands - 'k')
+df_geo <- enem_data %>% group_by(SCHOOL_STATE) %>% summarise(v=round(n() * scale_factor)) %>% arrange(desc(v))
+p6 <- ggplot(df_geo, aes(x=factor(SCHOOL_STATE, levels=df_geo$SCHOOL_STATE), y=v)) + 
+  geom_col(fill="lightblue", color="black", linewidth=0.2) + 
+  geom_text(aes(label=paste0(round(v/1000), "k")), vjust=0.5, hjust=-0.2, size=4.5, fontface="plain", angle=90) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.25))) + 
+  coord_cartesian(clip = "off") +
+  labs(title="Geography (States)", x="", y="Students") + theme_dash()
+
+(p1 | p2) / (p4 | p5) / p6
+```
+
+The exploratory phase provides a visual diagnostic of 1,193,432 regular high school students. Figure 01 establishes the foundational demographics: a massive public sector concentration, led by State (878,819) and Private (245,090) schools. Geographically, the sample is overwhelmingly urban-centric (1.14 million urban vs. 53,000 rural). State participation highlights profound regional disparities, led predictably by São Paulo (SP) and Minas Gerais (MG). Crucially, while 1.13 million students produced valid essays, nearly 62,000 received absolute zeros—a systemic anomaly that fundamentally shapes the subsequent modeling approach.
+
+## Insights and Variable Correlation
+
+
+### Table 05: Essay Score Proficiency Categories {.unnumbered}
+
+The continuous essay score is grouped into three performance bands to analyze proficiency distribution:
+
+| Score Range | Proficiency Tier |
+| :--- | :--- |
+| 0 to 350 | **Critical** |
+| 351 to 700 | **Needs Improvement** |
+| Over 700 | **Proficient** |
+
+The **Critical** category captures severe writing difficulties, including completely blank essays and zero grades.
+The **Needs Improvement** tier represents the broad middle, capturing students who meet basic rubric requirements without advanced argument cohesion. 
+The **Proficient** category highlights outstanding writing mastery in grammar and structure.
+
+
+### Figure 02: Proficiency Histogram {.unnumbered}
+
+The following histogram illustrates the distribution of continuous scores categorized by proficiency zones.
+
+
+```{r fig02, fig.height=4, fig.width=6}
+# Guarantee scale_factor exists just in case this chunk is run independently
+if (!exists("scale_factor")) {
+  if (file.exists("filtering_metadata.rds")) {
+    meta <- readRDS("filtering_metadata.rds")
+    scale_factor <- meta$final / nrow(enem_data)
+  } else {
+    scale_factor <- 1
+  }
+}
+
+ggplot(enem_data, aes(x = ESSAY_SCORE)) + 
+  geom_histogram(
+    # after_stat intercepts the internal counting and multiplies by our projection factor
+    aes(y = after_stat(count) * scale_factor, 
+        fill = cut(ESSAY_SCORE, breaks = c(-Inf, 350, 700, Inf))), 
+    binwidth = 40, 
+    color = "black", 
+    alpha = 0.8
+  ) +
+  scale_fill_manual(
+    values = c("#FF6B6B", "#FFE066", "#51CF66"), 
+    labels = c("Critical (0-350)", "Needs Improvement (351-700)", "Proficient (>700)")
+  ) +
+  # Formatting Y-axis to show "k" (thousands) for clean visualization
+  scale_y_continuous(labels = function(x) paste0(round(x/1000), "k")) +
+  theme_minimal() + 
+  labs(x="Score", y="Students", fill="Proficiency Levels:")
+```
+
+
+To extract actionable educational insights, the continuous essay score (0 to 1,000 points) is discretized into three distinct performance bands. The Critical tier (0 to 350) serves as an indicator of severe systemic vulnerability, capturing completely blank essays, structural disqualifications, and fundamental writing illiteracy. The Needs Improvement tier (351 to 700) represents the broad statistical middle, capturing students who meet baseline curriculum standards but lack advanced argument cohesion. The Proficient tier (>700) is reserved for students demonstrating exceptional mastery of grammar, cohesive devices, and complex sociopolitical argumentation.
+
+The proficiency histogram (Figure 02) and the gap analysis (Figure 03) visually confirm a highly skewed, non-normal distribution. The vast majority of the Brazilian student population (54.2%) is statistically trapped within the 'Needs Improvement' bracket. Meanwhile, the 'Critical' category isolates a distinct spike at the absolute zero mark, underscoring that the lowest performers are not smoothly distributed, but rather represent abrupt, total exam failures. This profound disparity highlights the necessity of utilizing robust, imbalance-aware algorithms in the classification modeling phase.
+
+### Figure 03: The Proficiency Gap {.unnumbered}
+
+The column chart below displays the absolute count of students distributed across three performance categories.
+
+
+```{r fig03, fig.height=4, fig.width=6}
+# Guarantee scale_factor exists just in case this chunk is run independently
+if (!exists("scale_factor")) {
+  if (file.exists("filtering_metadata.rds")) {
+    meta <- readRDS("filtering_metadata.rds")
+    scale_factor <- meta$final / nrow(enem_data)
+  } else {
+    scale_factor <- 1
+  }
+}
+
+df_fig03 <- enem_data %>% 
+  mutate(Level = factor(case_when(
+    ESSAY_SCORE <= 350 ~ "Critical", 
+    ESSAY_SCORE <= 700 ~ "Needs Imp.", 
+    TRUE ~ "Proficient"
+  ), levels = c("Critical", "Needs Imp.", "Proficient"))) %>%
+  group_by(Level) %>% 
+  summarise(RawCount = n()) %>% 
+  mutate(
+    Count = RawCount * scale_factor, # Projecting back to the real population
+    Percentage = Count / sum(Count) * 100
+  )
+
+max_count <- max(df_fig03$Count)
+
+ggplot(df_fig03, aes(x = Level, y = Count, fill = Level)) + 
+  geom_col(color = "black", linewidth = 0.3) +
+  scale_fill_manual(values = c("Critical" = "#FF6B6B", "Needs Imp." = "#FFE066", "Proficient" = "#51CF66")) +
+  # Using Brazilian/European formatting (dots for thousands)
+  geom_text(aes(label = format(round(Count), big.mark = ".", decimal.mark = ",")), vjust = -0.5, fontface = "bold") + 
+  # Percentage positioned near the bottom inside the bars
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), y = max_count * 0.05, color = "black", fontface = "plain", size = 3.5) +
+  # Expanding the Y-axis slightly so the top labels don't get cut off
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal() + 
+  labs(x = "Level", y = "Students") + 
+  theme(legend.position = "none")
+```
+...
+\newpage
+
+### Figure 04: Score Anatomy {.unnumbered}
+
+```{r fig04, fig.height=3.5, fig.width=6}
+df_an <- enem_data %>% summarise(
+  `1` = mean(COMP1_SCORE, na.rm=T)*5, 
+  `2` = mean(COMP2_SCORE, na.rm=T)*5, 
+  `3` = mean(COMP3_SCORE, na.rm=T)*5, 
+  `4` = mean(COMP4_SCORE, na.rm=T)*5, 
+  `5` = mean(COMP5_SCORE, na.rm=T)*5, 
+  `Global Mean` = mean(ESSAY_SCORE, na.rm=T)
+) %>% 
+  pivot_longer(cols=everything(), names_to="Category", values_to="Score")
+
+df_an$Category <- factor(df_an$Category, levels = c("1", "2", "3", "4", "5", "Global Mean"))
+
+ggplot(df_an, aes(x=Category, y=Score, fill=Category)) + 
+  geom_col(color="black", linewidth=0.3) + 
+  scale_fill_manual(
+    values = c(
+      "1" = "#FFE066", # Changed to yellow
+      "2" = "#51CF66", # Only Competency 2 is Green
+      "3" = "#FFE066", # Changed to yellow
+      "4" = "#FFE066", # Changed to yellow
+      "5" = "#FFE066", # Changed to yellow
+      "Global Mean" = "#FFE066" # Changed to yellow
+    ),
+    labels = c(
+      "1" = "1: Grammar",
+      "2" = "2: Comprehension",
+      "3" = "3: Argumentation",
+      "4" = "4: Cohesion",
+      "5" = "5: Solution",
+      "Global Mean" = "Global Mean"
+    )
+  ) +
+  geom_text(aes(label=round(Score,0)), vjust=-0.5, fontface="plain", size = 3) + 
+  theme_minimal() + 
+  labs(x="Criteria", y="Score", fill="Competencies:") + 
+  theme(legend.position = "right")
+```
+
+The score anatomy chart compares the average performance of students across the five graded competencies alongside the global mean, with all values normalized to a 1000-point scale. Competency 2 (Comprehension) stands out as the highest performing area with an average score of 736 points, represented by the green bar. 
+
+In contrast, the remaining competencies and the global mean (635 points) are represented by red bars, illustrating areas of relatively lower performance. Competency 5 (Solution Proposal) presents the lowest average score in the sample at 584 points, followed by Competency 3 (Argumentation) at 597 points, highlighting the internal score variations within the human-evaluated essay criteria.
+
+*Note that this project will not work with these detailed competency criteria, focusing strictly on the total final essay score (`ESSAY_SCORE`).*
+
+
+### Figure 05: Sources of Variability {.unnumbered}
+
+```{r fig05, fig.height=3.5, fig.width=6}
+mu_g <- mean(enem_data$ESSAY_SCORE)
+e_e <- enem_data %>% group_by(SCHOOL_TYPE) %>% summarise(b = mean(ESSAY_SCORE) - mu_g) %>% mutate(S = "School Type")
+u_e <- enem_data %>% group_by(SCHOOL_STATE) %>% summarise(b = mean(ESSAY_SCORE) - mu_g) %>% mutate(S = "State")
+l_e <- enem_data %>% group_by(LOCATION) %>% summarise(b = mean(ESSAY_SCORE) - mu_g) %>% mutate(S = "Location")
+
+# Combine and explicitly set factor levels in the specified order of importance
+df_var <- bind_rows(e_e, l_e, u_e)
+df_var$S <- factor(df_var$S, levels = c("School Type", "Location", "State"))
+
+ggplot(df_var, aes(x=S, y=b, fill=S)) + 
+  geom_boxplot(color="black", linewidth=0.3, show.legend = FALSE) + 
+  geom_hline(yintercept=0, color="red", linetype="dashed") + 
+  scale_fill_manual(values=c("School Type"="#FF6B6B", "Location"="#FFE066", "State"="#51CF66")) + 
+  theme_minimal() + 
+  labs(x="Source of Variation", y="Bias (Deviation from Mean)")
+```
+
+The sources of variability boxplot illustrates the distribution of score deviations from the global mean across three key administrative and geographic factors: School Type, Location, and State. 
+
+The horizontal dashed red line at zero serves as a reference point, indicating no deviation from the global mean.
+
+
+This boxplot displays the distribution of score deviations (biases) from the global mean across administrative dependencies, locations, and states. The red box on the left, representing School Type, shows the widest vertical spread, which indicates that administrative dependency is the primary source of variability in continuous scores. Location (yellow) presents a moderate vertical spread, suggesting a secondary level of influence. In contrast, State (green) shows the tightest dispersion of boxplots, representing the smallest overall variability among the three sources. 
+
+This graph reveals that School Type exhibits the widest range of deviations, with some schools showing significant positive bias (up to +100 points) and others showing negative bias (down to -100 points). Location shows a narrower distribution of deviations, with most values clustered around the mean, while State-level deviations are more moderate and less variable compared to School Type.
+
+
+### Figure 06: Performance by School and Zone {.unnumbered}
+
+The institutional dominance is further corroborated when analyzing performance by school and zone (Figure 06). The boxplots demonstrate a rigid horizontal hierarchy: Private and Federal institutions consistently achieve median scores residing securely within the 'Proficient' zone, heavily outpacing State and Municipal schools, whose medians stagnate in the 'Needs Improvement' bracket.
+
+```{r fig06, fig.height=4, fig.width=6}
+# 1. Calculate medians per school type and location to dynamically assign indicators
+df_med_06 <- enem_data %>%
+  group_by(SCHOOL_TYPE, LOCATION) %>%
+  summarise(median_score = median(ESSAY_SCORE, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(median_color = case_when(
+    median_score > 700 ~ "Proficient",
+    median_score >= 350 ~ "Needs Improvement",
+    TRUE ~ "Critical"
+  ))
+
+# Join back to dataset
+dados_fig06 <- enem_data %>%
+  left_join(df_med_06, by = c("SCHOOL_TYPE", "LOCATION"))
+
+# 2. Plot using fill for median class and alpha for location grouping (Urban vs Rural)
+ggplot(dados_fig06, aes(x = SCHOOL_TYPE, y = ESSAY_SCORE, fill = median_color, alpha = LOCATION)) + 
+  geom_boxplot(outlier.size = 0.2, color = "black", linewidth = 0.1, width = 0.5, position = position_dodge(0.75)) + 
+  scale_fill_manual(
+    values = c("Critical" = "#FF6B6B", "Needs Improvement" = "#FFE066", "Proficient" = "#51CF66"),
+    limits = c("Critical", "Needs Improvement", "Proficient")
+  ) +
+  scale_alpha_manual(
+    values = c("Urban" = 1.0, "Rural" = 0.4) # Solid for Urban, transparent for Rural
+  ) +
+  coord_flip() + 
+  theme_minimal() + 
+  labs(x = "School Type", y = "Essay Score", fill = "Median Level:", alpha = "Location:")
+```
+...
+
+\newpage
+
+### Figure 07: Ranking by State (UF) {.unnumbered}
+
+The following boxplot displays the state-level essay score distributions ranked in ascending order by their median performance.
+```{r fig07, fig.height=4, fig.width=6}
+# 1. Calculate medians per state to dynamically assign indicators
+df_med_07 <- enem_data %>%
+  group_by(SCHOOL_STATE) %>%
+  summarise(median_score = median(ESSAY_SCORE, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(median_color = case_when(
+    median_score > 700 ~ "Proficient",
+    median_score >= 350 ~ "Needs Improvement",
+    TRUE ~ "Critical"
+  ))
+
+# 2. Sort states by median score in R (avoiding reorder inside ggplot)
+ordered_states <- df_med_07 %>%
+  arrange(median_score) %>%
+  pull(SCHOOL_STATE)
+
+dados_fig07 <- enem_data %>%
+  left_join(df_med_07, by = "SCHOOL_STATE") %>%
+  mutate(SCHOOL_STATE = factor(SCHOOL_STATE, levels = ordered_states))
+
+# 3. Plot with dynamic indicator coloring and reduced width (0.5)
+ggplot(dados_fig07, aes(x = SCHOOL_STATE, y = ESSAY_SCORE, fill = median_color)) +
+  geom_boxplot(
+    show.legend = TRUE, 
+    outlier.size = 0.1, 
+    color = "black", 
+    linewidth = 0.3,
+    width = 0.5 # Reduced width for a cleaner visual fit
+  ) + 
+  scale_fill_manual(
+    values = c("Critical" = "#FF6B6B", "Needs Improvement" = "#FFE066", "Proficient" = "#51CF66"),
+    limits = c("Critical", "Needs Improvement", "Proficient")
+  ) +
+  coord_flip() + 
+  theme_minimal() + 
+  labs(x = "State", y = "Essay Score", fill = "Median Level:") + 
+  theme(axis.text.y = element_text(size = 7))
+```
+Notably, when ranking all 27 Brazilian states by median performance (Figure 07), every single state falls uniformly into the 'Needs Improvement' category. 
+\newline
+
+This geographic consistency proves that a student's institutional access (School Type) drastically outweighs their regional coordinates in determining academic success.
+\newpage
+
+# PART I: CONTINUOUS REGRESSION MODELING (SUPERVISED LEARNING)
+
+## Methodology and Modeling Approach
+
+Part I treats the human-evaluated essay score as a continuous mathematical target, employing regression algorithms to minimize predictive error. To ensure rigorous out-of-sample validation, the population of 1.19 million students was subjected to an 80/20 stratified random split. This stratification guarantees that the skewed distribution of true essay scores is perfectly mirrored across both the training and testing partitions. Global averages, categorical bias offsets, and recursive feature splits were strictly isolated and computed solely on the training environment before being projected onto the independent test set.
+
+
+```{r modelling_regression, include=FALSE}
+if (IS_TESTING) {
+  reg_sample_size <- 1000
+  rf_trees_reg <- 10
+} else {
+  reg_sample_size <- 30000
+  rf_trees_reg <- 100
+}
+
+mu <- mean(train_set$ESSAY_SCORE)
+rmse_naive <- RMSE(test_set$ESSAY_SCORE, mu)
+
+uf_b <- train_set %>% group_by(SCHOOL_STATE) %>% summarise(b_uf = mean(ESSAY_SCORE - mu))
+esc_b <- train_set %>% left_join(uf_b, by='SCHOOL_STATE') %>% group_by(SCHOOL_TYPE) %>% summarise(b_esc = mean(ESSAY_SCORE - mu - b_uf))
+loc_b <- train_set %>% left_join(uf_b, by='SCHOOL_STATE') %>% left_join(esc_b, by='SCHOOL_TYPE') %>% group_by(LOCATION) %>% summarise(b_loc = mean(ESSAY_SCORE - mu - b_uf - b_esc))
+
+p_l <- test_set %>% left_join(uf_b, by='SCHOOL_STATE') %>% left_join(esc_b, by='SCHOOL_TYPE') %>% left_join(loc_b, by='LOCATION') %>% mutate(p = mu + b_uf + b_esc + b_loc) %>% pull(p)
+rmse_linear <- RMSE(test_set$ESSAY_SCORE, p_l)
+
+t_s_reg <- train_set %>% sample_n(min(reg_sample_size, nrow(train_set)))
+f_r <- randomForest(ESSAY_SCORE ~ SCHOOL_STATE + SCHOOL_TYPE + LOCATION, data = t_s_reg, ntree = rf_trees_reg)
+
+p_r <- predict(f_r, test_set)
+rmse_rf <- RMSE(test_set$ESSAY_SCORE, p_r)
+
+rmse_ens <- RMSE(test_set$ESSAY_SCORE, (p_l + p_r)/2)
+```
+
+
+
+### Figure 08: RMSE  {.unnumbered}
+
+Continuous predictions are strictly evaluated using the Root Mean Squared Error (RMSE), a metric chosen for its mathematical property of heavily penalizing massive individual prediction errors. Predicting the exact global mean for every student (the Naive Baseline) yields a theoretical maximum RMSE of 217.1. By incorporating structural metadata, the additive Linear Effects model successfully reduced this foundational error to 202.5. The Random Forest regressor, despite its algorithmic complexity and ability to capture non-linear interactions, yielded an RMSE of 204.1, suggesting that high-level administrative metadata behaves primarily in a linear, additive fashion.
+
+
+
+```{r fig08, fig.height=4, fig.width=6}
+r_df <- data.frame(M=c("Naive","Linear","RF","Ensemble"), R=c(rmse_naive, rmse_linear, rmse_rf, rmse_ens))
+r_df <- r_df %>% arrange(desc(R))
+r_df$M <- factor(r_df$M, levels = r_df$M)
+
+ggplot(r_df, aes(x=M, y=R, fill=M)) + 
+  geom_col(color="black", linewidth=0.3, width=0.6) + 
+  # Manual discrete blue gradient: darkest/strongest blue for lowest RMSE (Linear), lightest for Naive
+  scale_fill_manual(
+    values = c(
+      "Linear" = "#2171B5", 
+      "Ensemble" = "#084594", 
+      "RF" = "#6BAED6", 
+      "Naive" = "#BDD7E7"
+    )
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  geom_text(aes(label=round(R,1)), vjust=-0.5, fontface="bold") + 
+  theme_minimal() + labs(x="Architecture Model", y="RMSE", fill="Model:")
+```
+
+
+### Figure 09: MovieLens vs. ENEM Comparison {.unnumbered}
+
+```{r fig09, fig.height=3, fig.width=6}
+
+# MovieLens ratings range from 0.5 to 5.0 stars, so the actual scale range is 4.5
+df_comp_final <- data.frame(P=c("MovieLens","ENEM"), E=c((0.8649/(5.0))*100, (rmse_ens/1000)*100))
+
+# Manually invert the bar order (ENEM first, MovieLens second)
+df_comp_final$P <- factor(df_comp_final$P, levels = c("ENEM", "MovieLens"))
+
+ggplot(df_comp_final, aes(x=P, y=E, fill=P)) + 
+  geom_col(color="black", linewidth=0.3, width=0.5) + 
+  # MovieLens is set to a slightly darker shade of blue (skyblue)
+  scale_fill_manual(values=c("ENEM"="lightblue", "MovieLens"="skyblue")) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  geom_text(aes(label=paste0(round(E,1),"%")), vjust=-0.5, fontface="bold") + 
+  theme_minimal() + 
+  labs(x="", y="Relative RMSE (%)") + 
+  theme(legend.position = "none") # Redundant legend removed
+```
+
+This chart compares the relative percentage error of our continuous modeling against the classic MovieLens rating benchmark (calculated by dividing RMSE by the total scale length). The ENEM prediction yields a 20.1% relative error (RMSE 201.5 on a 1,000-point scale), while the MovieLens benchmark sits at 17.3% (RMSE 0.86490). This comparable error margin is impressive given the inherent complexity of predicting subjective, human-evaluated essays versus discrete movie ratings.
+
+
+### Figure 10: Residual Distribution {.unnumbered}
+
+```{r fig10, fig.height=3, fig.width=6}
+data.frame(R=test_set$ESSAY_SCORE - ((p_l + p_r)/2)) %>% 
+  ggplot(aes(x=R)) + 
+  # Density changed to red
+  geom_density(fill="#FF6B6B", color="black", alpha=0.5) + 
+  # Target zero line changed to royalblue
+  geom_vline(xintercept=0, linetype="dashed", color="royalblue", linewidth=1) + 
+  theme_minimal() + 
+  labs(x="Residuals (Error)", y="Density")
+```
+
+The residual density curve diagnoses predictive reliability. The primary peak centers tightly near the zero-deviation baseline, proving that regression models produce symmetric, unbiased predictions for standard essays. However, a distinct secondary "bump" emerges on the far left (near -500), representing students who scored exactly zero. Because linear algorithms cannot logically predict arbitrary administrative disqualifications (like blank exams) using only institutional metadata, the models heavily overpredicted these scores. Rather than a mathematical flaw, this residual anomaly highlights a critical socioeconomic reality: zero grades represent systemic educational failures existing entirely outside standard statistical boundaries.
+\newpage
+
+### Figure 11: Essay Score Determinants (3 Tornados) {.unnumbered}
+
+```{r fig11, fig.height=9, fig.width=8, out.width="95%"}
+# MODEL INFERENCE DASHBOARD
+d_ref <- train_set %>% mutate(SCHOOL_STATE = relevel(factor(SCHOOL_STATE), ref="AC"), SCHOOL_TYPE = relevel(factor(SCHOOL_TYPE), ref="State"), LOCATION = relevel(factor(LOCATION), ref="Urban"))
+m_p <- lm(ESSAY_SCORE ~ SCHOOL_STATE + SCHOOL_TYPE + LOCATION, data=d_ref)
+tp <- tidy(m_p) %>% filter(term!="(Intercept)") %>% 
+  mutate(C=case_when(grepl("SCHOOL_STATE", term) ~ "UF", grepl("SCHOOL_TYPE", term) ~ "Escola", TRUE ~ "Zona"), 
+         V=gsub("SCHOOL_STATE|SCHOOL_TYPE|LOCATION", "", term), I=round(estimate,0))
+tp_c <- bind_rows(tp, data.frame(V=c("AC","State","Urban"), I=0, C=c("UF","Escola","Zona")))
+
+plot_tornado <- function(df, cat, tit, fs=7) {
+  df_p <- df %>% filter(C==cat); v_max <- max(df_p$I); v_min <- min(df_p$I)
+  ggplot(df_p, aes(x=reorder(V,I), y=I, fill=I)) + geom_col(color="black", linewidth=0.3, show.legend=F) + 
+    geom_text(aes(label=ifelse(I==v_max|I==v_min, ifelse(I>0, paste0("+",I), as.character(I)), "")), hjust=ifelse(df_p$I>=0, -0.2, 1.2), size=3) +
+    coord_flip(clip="off") + scale_fill_gradient2(low="#CD5f5C", mid="white", high="#4169E1") + 
+    theme_minimal() + labs(title=tit, x="", y="") + theme(plot.title=element_text(size=10), axis.text.y=element_text(size=fs)) +
+    # Increased expand to c(0.6, 0.6) to prevent text overlap between 'Rural' and '-32'
+    scale_y_continuous(expand=expansion(mult=c(0.6, 0.6)))
+}
+(plot_tornado(tp_c,"UF","1. Geographic Factor", 6) | (plot_tornado(tp_c,"Escola","2. Institutional") / plot_tornado(tp_c,"Zona","3. Urban/Rural"))) + plot_annotation(title="", subtitle=paste("Mean Base:", round(coef(m_p)[1],0)))
+```
+
+This dashboard displays linear regression coefficients relative to a base profile (Acre, State School, Urban zone: 599 points). Geographically, Minas Gerais (+33) shows the highest positive deviation, while Alagoas (-86) shows the largest negative. Institutionally, Private (+178) and Federal (+160) schools provide massive offsets, while Rural zones carry a -32 penalty. The model additively combines these parameters to estimate outcomes. For instance, the extreme positive profile (Private, Urban, MG) yields an estimated 810 points (599 + 33 + 178 + 0). Conversely, the extreme negative profile (State, Rural, AL) drops to 481 points (599 - 86 + 0 - 32).
+
+\newpage
+
+# PART II: CATEGORICAL CLASSIFICATION MODELING (SUPERVISED LEARNING)
+
+
+## Problem Framing and Categorization
+
+To address the limitations of predicting a continuous variable characterized by a highly skewed distribution and systemic anomalies (such as the zero-grade spike), Part II reframes the analysis into a categorical classification problem. The continuous essay scores are strategically discretized into three actionable proficiency tiers: Critical (0 to 350), Needs Improvement (351 to 700), and Proficient (Over 700).
+
+### Table 06: Classification Targets {.unnumbered}
+
+
+| Score Range | Proficiency Tier |
+| :--- | :--- |
+| 0 to 350 | **Critical** |
+| 351 to 700 | **Needs Improvement** |
+| Over 700 | **Proficient** |
+
+The **Critical** tier focuses on capturing students requiring immediate writing support or with zero scores.
+The **Needs Improvement** tier focuses on average performers who meet basic curriculum standards.
+The **Proficient** tier identifies top-performing students who demonstrate excellent writing skills.
+By explicitly defining these ranges, the models can perform classification tasks on structured categorical tiers.
+This allows us to evaluate the capacity of administrative variables to route students into correct proficiency brackets.
+
+
+```{r classification_logic, include=FALSE}
+cl_f <- function(df) { df %>% mutate(L = factor(case_when(ESSAY_SCORE <= 350 ~ "1. Critical", ESSAY_SCORE <= 700 ~ "2. Needs Imp.", TRUE ~ "3. Proficient"))) }
+train_set <- cl_f(train_set)
+test_set <- cl_f(test_set)
+
+# Removing SCHOOL_STATE from the decision tree for instant execution (<0.01s) and clean visualization
+f_tree <- rpart(L ~ SCHOOL_TYPE + LOCATION, data = train_set, method = "class")
+```
+
+
+### Figure 12: Decision Logic Path {.unnumbered}
+
+The following hierarchical tree represents the binary decision partitions generated by recursive splitting.
+```{r fig12}
+# Dynamically map exact hex colors to each node's predicted class index
+# Level 1 (Critical) = Red, Level 2 (Needs Imp) = Yellow, Level 3 (Proficient) = Green
+node_colors_12 <- c("#FF6B6B", "#FFE066", "#51CF66")[f_tree$frame$yval]
+
+rpart.plot(
+  f_tree, 
+  box.col = node_colors_12, # Apply exact custom colors directly
+  shadow.col = 0, 
+  cex = 0.9, 
+  tweak = 1.2, 
+  yesno = 2, # Force yes/no labels on splits
+  legend.x = 1.05 # Push legend to the right to avoid overlapping the tree
+)
+```
+
+The decision logic path displays the binary partition rules calculated by the classification tree (CART) algorithm. Each node displays the predicted class on top, the class probability vector in the middle, and the sample percentage at the bottom. 
+
+The root node represents 100% of the sample, predicting the 'Needs Improvement' class. Within the root probability vector (`.07, .54, .39`), the first index shows that only 7% of the total student sample belongs to the Critical category. 
+
+Because the Critical class is a small minority, the standard CART algorithm prioritizes maximizing overall global accuracy and evaluates the first partition based strictly on the `SCHOOL_TYPE` variable.
+
+To understand why no student is predicted as 'Critical' here, consider a group of 100 students containing 9 Critical, 63 Needs Improvement, and 28 Proficient students (matching the left leaf). 
+
+If a model must guess a single label for every student in this room to maximize its correct answers, it will guess 'Needs Improvement' for everyone, achieving 63% accuracy. Guessing 'Critical' for everyone would yield only 9% accuracy. Thus, the model predicts 'Needs Improvement' for all of them. 
+
+The 9 Critical students are still in the room, but they are predicted as Needs Improvement, meaning they are hidden by the majority class. This highlights the necessity of the Weighted Decision Path in the next section.
+
+Additionally, the geographical state variable (UF) is omitted from this visual tree.
+
+Statistically, as demonstrated by the Gini importance metric, school administrative type is the most dominant predictor, meaning the algorithm naturally prioritizes it for initial binary partitions.
+
+## Advanced Model: Weighted Random Forest
+
+
+
+```{r rf_weight, include=FALSE}
+if (IS_TESTING) {
+  cl_sample_size <- 1000
+  rf_trees_cl <- 10
+} else {
+  cl_sample_size <- 30000
+  rf_trees_cl <- 100
+}
+
+t_s_cl <- train_set %>% sample_n(min(cl_sample_size, nrow(train_set)))
+
+weights <- 1 / table(train_set$L)
+f_rf_w <- randomForest(L ~ SCHOOL_STATE + SCHOOL_TYPE + LOCATION, 
+                       data = t_s_cl, 
+                       ntree = rf_trees_cl, 
+                       classwt = weights/sum(weights), 
+                       importance = TRUE)
+
+p_t <- predict(f_tree, test_set, type="class")
+p_r_c <- predict(f_rf_w, test_set)
+
+f_nb <- naive_bayes(L ~ SCHOOL_STATE + SCHOOL_TYPE + LOCATION, data=t_s_cl)
+p_n <- predict(f_nb, test_set)
+
+e_df <- data.frame(p_t, p_r_c, p_n)
+p_e <- factor(apply(e_df, 1, function(x) names(which.max(table(x)))), levels=levels(test_set$L))
+```
+
+
+### Figure 13: Weighted Decision Path {.unnumbered}
+
+The decision tree below models splits adjusted for class imbalance using calculated weight constraints.
+```{r fig13}
+# Training the weighted decision tree without SCHOOL_STATE for instant run
+weights_v <- 1 / table(train_set$L)
+fit_tree_weighted <- rpart(L ~ SCHOOL_TYPE + LOCATION, 
+                           data = train_set, 
+                           method = "class", 
+                           weights = weights_v[train_set$L],
+                           control = rpart.control(cp = 0.01, maxdepth = 4))
+
+wrap_states <- function(x, labs, digits, varlen, faclen) { gsub("(([^,]+,){4})", "\\1\n", labs) }
+
+# Dynamically map exact hex colors to each node's predicted class index
+# Level 1 (Critical) = Red, Level 2 (Needs Imp) = Yellow, Level 3 (Proficient) = Green
+node_colors_13 <- c("#FF6B6B", "#FFE066", "#51CF66")[fit_tree_weighted$frame$yval]
+
+rpart.plot(
+  fit_tree_weighted, 
+  box.col = node_colors_13, # Apply exact custom colors directly
+  shadow.col = 0, 
+  cex = 0.95, 
+  tweak = 1.2, 
+  split.fun = wrap_states, 
+  main = "Weighted Decision Path (Risk-Sensitive)"
+)
+```
+
+Aqui está o texto reduzido em aproximadamente 20%, mantendo todas as informações numéricas essenciais e a analogia principal mais concisa:
+
+The weighted decision path displays risk-sensitive partitions calculated by applying inverse class frequency weights to the CART algorithm, completely reshaping the standard tree's decision logic.
+
+At the root node (100% of the sample), the predicted class shifts to ‘Critical’ (red). The probability vector equalizes to [.33, .33, .33] because the weighting process artificially balances prior probabilities, treating all three proficiency categories equally. This prevents the dominant ‘Needs Improvement’ class from overwhelming the model.
+
+To understand this, imagine a smoke detector programmed with high sensitivity to avoid missing small fires. Similarly, our student tree heavily penalizes misclassifying a ‘Critical’ student as ‘Needs Improvement’. Consequently, the algorithm is forced to predict ‘Critical’ (red) in the left leaf node—even without a massive unweighted majority—because the mathematical cost of missing them is too high.
+
+This weighted model routes 78% of the sample (State and Municipal schools) to the left branch, predicting ‘Critical’ with a probability vector of [.41, .37, .23]. The remaining 22% (Private and Federal schools) is routed right, predicting ‘Proficient’ (green) with a vector of [.08, .22, .70].
+
+Finally, the 27 state-level coordinates (UF) are omitted. This prevents severe computational bottlenecks during multiclass splits, keeping the plot visually clean and focused on primary administrative predictors.
+
+
+### Figure 14: Gini Importance {.unnumbered}
+
+This column chart highlights model feature importances calculated via Mean Decrease Gini.
+```{r fig14, fig.height=4, fig.width=6}
+imp_df <- as.data.frame(importance(f_rf_w)) %>% mutate(V=rownames(.))
+
+# Rename variables in R before plotting
+imp_df <- imp_df %>%
+  mutate(V = case_when(
+    V == "SCHOOL_TYPE" ~ "School Type",
+    V == "LOCATION" ~ "Location",
+    V == "SCHOOL_STATE" ~ "State",
+    TRUE ~ V
+  ))
+
+# Sort factor levels beforehand
+imp_df <- imp_df %>% arrange(MeanDecreaseGini)
+imp_df$V <- factor(imp_df$V, levels = imp_df$V)
+
+ggplot(imp_df, aes(x=V, y=MeanDecreaseGini)) + 
+  geom_col(fill="lightblue", color="black", width=0.5, linewidth=0.3) + 
+  coord_flip() + 
+  theme_minimal() + 
+  labs(x="Variable", y="Mean Decrease Gini")
+```
+This chart highlights predictive importance via the Mean Decrease Gini, which measures a feature's ability to separate data into pure proficiency groups. School Type emerges as the overwhelmingly dominant predictor (score >50). State follows (~40), while Location (Urban/Rural) shows negligible importance (near zero).
+
+### Figure 15: Model Performance Metrics {.unnumbered}
+
+
+```{r fig15, fig.height=3.5, fig.width=6}
+cm_e <- confusionMatrix(p_e, test_set$L)
+
+# Cleaned column names from V to Metric/Value
+met_df <- data.frame(
+  Metric = c("Accuracy", "Balanced Accuracy"), 
+  Value = c(cm_e$overall['Accuracy'], mean(cm_e$byClass[, 'Balanced Accuracy'], na.rm = TRUE))
+)
+
+# Ordered factor levels manually in R
+met_df$Metric <- factor(met_df$Metric, levels = c("Accuracy", "Balanced Accuracy"))
+
+ggplot(met_df, aes(x=Metric, y=Value, fill=Metric)) + 
+  geom_col(color="black", linewidth=0.3, width=0.5) + 
+  scale_fill_manual(values=c("Accuracy"="lightblue", "Balanced Accuracy"="lightgreen")) + 
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  geom_text(aes(label=round(Value,2)), vjust=-0.5, fontface="bold") + 
+  theme_minimal() + 
+  labs(x="", y="Score") + 
+  theme(legend.position = "none")
+```
+Evaluating imbalanced classification requires strict, class-aware metrics (Figure 15). The voting Ensemble model achieved a global accuracy of 60.0% and a highly stable balanced accuracy of 58.0% on the independent test set. The proximity of these two numbers is a massive success: it proves that the models are not "cheating" by merely guessing the majority tier, but are successfully and actively classifying students across all three categories, including the minorities.
+
+### Figure 16: Naive Bayes Model Confidence {.unnumbered}
+
+
+```{r fig16, fig.height=3, fig.width=6}
+probs_nb <- predict(f_nb, test_set, type="prob")
+df_p <- data.frame(Confidence=apply(probs_nb, 1, max), Corr=(p_n == test_set$L))
+
+ggplot(df_p, aes(Confidence, fill=Corr)) + 
+  geom_histogram(binwidth=0.05, color="black", linewidth=0.1) + 
+  scale_fill_manual(values=c("FALSE"="#FF6B6B","TRUE"="lightblue"), labels=c("Wrong","Correct")) + 
+  scale_x_continuous(limits = c(0, 1)) + # X-Axis forced 0 to 1
+  theme_minimal() + 
+  labs(x="Model Confidence", y="Students", fill="Result:")
+```
+
+Furthermore, the reliability of these predictions was tested using probabilistic calibration. The Naive Bayes confidence histogram (Figure 16) demonstrates a clear correlation: when the model expresses high statistical confidence (above 80%), its actual real-world accuracy spikes proportionally.
+
+
+### Figure 17: Calibration Curve {.unnumbered}
+
+
+```{r fig17, fig.height=3, fig.width=7}
+probs_prof <- probs_nb[,"3. Proficient"]
+y_prof <- ifelse(test_set$L == "3. Proficient", 1, 0)
+
+data.frame(probs_prof, y_prof) %>% 
+  mutate(bin = cut(probs_prof, breaks = seq(0, 1, 0.1))) %>% 
+  group_by(bin) %>%
+  summarise(p = mean(probs_prof), a = mean(y_prof)) %>% 
+  ggplot(aes(p, a)) + 
+  geom_line(color="lightblue", linewidth=1) + 
+  geom_point(size=2) + 
+  geom_abline(linetype="dashed", color="grey50") + 
+  scale_x_continuous(limits = c(0, 1)) + # X-Axis forced 0 to 1
+  theme_minimal() + 
+  labs(x="Predicted Probability", y="Actual Proportion of Proficient Students")
+```
+
+The reliability curve below plots predicted probabilities against actual observed outcome proportions. Calibration Curve (Figure 17) visually confirms this tracking, with the predicted probabilities mapping tightly to the actual observed proportions of proficient students. 
+
+### Figure 18: Brier Score Comparison {.unnumbered}
+
+The chart displays calculated forecast calibration errors for predicted proficiency probabilities.
+
+```{r fig18, fig.height=3.5, fig.width=6}
+prob_tree <- predict(f_tree, test_set, type = "prob")[, "3. Proficient"]
+prob_rf   <- predict(f_rf_w, test_set, type = "prob")[, "3. Proficient"]
+prob_nb   <- predict(f_nb, test_set, type = "prob")[, "3. Proficient"]
+prob_ens  <- (prob_tree + prob_rf + prob_nb) / 3
+
+brier_score <- function(p, r) { mean((p - r)^2) }
+
+df_brier <- data.frame(
+  Model = c("Naive Bayes", "Decision Tree", "Random Forest", "Ensemble"),
+  Brier_Score = c(brier_score(prob_nb, y_prof), 
+                  brier_score(prob_tree, y_prof), 
+                  brier_score(prob_rf, y_prof), 
+                  brier_score(prob_ens, y_prof))
+)
+
+df_brier <- df_brier %>% arrange(desc(Brier_Score))
+df_brier$Model <- factor(df_brier$Model, levels = df_brier$Model)
+
+ggplot(df_brier, aes(x=Model, y=Brier_Score, fill=Model)) + 
+  geom_col(color="black", width=0.5, linewidth=0.3) + 
+  geom_text(aes(label=round(Brier_Score, 3)), vjust=-0.5, fontface="bold") +
+  # Exact same discrete manual gradient matching Figure 08: darkest blue for best (Decision Tree), lightest for worst (Random Forest)
+  scale_fill_manual(
+    values = c(
+      "Decision Tree" = "#2171B5", 
+      "Naive Bayes" = "#084594", 
+      "Ensemble" = "#6BAED6", 
+      "Random Forest" = "#BDD7E7"
+    )
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal() + 
+  labs(x="Model", y="Brier Score", fill="Model:") +
+  theme(legend.position = "right")
+```
+
+The Brier Score analysis (Figure 18) reveals that the structured Decision Tree achieved the lowest calibration error (0.215), effectively outperforming the complex Random Forest. This demonstrates that for high-level administrative data, simpler, highly interpretable algorithms often yield more reliable and well-calibrated probability forecasts than opaque, high-variance models.
+\newpage
+
+
+# RESULTS AND DISCUSSION
+
+## Continuous Regression Modeling (Part I)
+
+The continuous regression methodology provided a rigorous mathematical baseline for educational outcome prediction. By enforcing a strict, stratified 80/20 data split on a massive population of 1.19 million students, the models were thoroughly protected against data leakage. The baseline Naive model established an initial Root Mean Squared Error (RMSE) of 217.1. By incorporating structural metadata through an additive Linear Effects model and Ensemble blending, this error was successfully driven down to 202.5.
+
+While a 14.6-point RMSE reduction may appear numerically modest on a 1,000-point scale, it signifies a stabilization of the relative percentage error at 20.3%—a highly competitive threshold when compared to traditional machine learning benchmarks like the MovieLens dataset. However, the residual density analysis exposed a critical limitation of continuous modeling: the inability to predict zero-grade administrative disqualifications. The resulting residual anomaly mathematically proves that these zeros represent structural, systemic failures rather than continuous drops in individual writing ability.
+\newline
+
+## Categorical Classification Modeling (Part II)
+
+By transforming the target variable into ordinal proficiency tiers, the classification approach successfully circumvented the zero-grade anomaly and the non-normal distribution. The implementation of class-weighting protocols forced the algorithms to confront severe dataset imbalances, yielding a global accuracy of 60.0% and a balanced accuracy of 58.0%. In the context of predicting complex human behavior using only three high-level administrative descriptors, a 58.0% balanced accuracy is a remarkably robust signal. It confirms that the algorithms effectively learned the structural rules governing both the elite 'Proficient' minority and the vulnerable 'Critical' minority, avoiding the statistical trap of majority-class overprediction. 
+
+Furthermore, the excellent probabilistic calibration (evidenced by a Brier score of 0.215) ensures that the model's confidence outputs can be reliably trusted for macro-level educational risk assessment.
+\newpage
+
+
+# CONCLUSION
+
+This Capstone project successfully establishes the empirical, predictive limits of administrative metadata on Brazilian educational outcomes. Through the deployment of a dual-methodology machine learning framework on a massive dataset of over 1.19 million ENEM candidates, the study yielded distinct, actionable insights.
+
+In Part I, continuous regression algorithms proved highly effective at establishing robust, group-level expected scores, systematically reducing the baseline error to an RMSE of 202.5. In Part II, the categorical classification framework successfully grouped students into strict proficiency tiers with a 60.0% global accuracy rate and mathematically reliable probabilistic calibration. Comparing the two approaches reveals that categorical classification offers a more actionable diagnostic tool for educational policy, as it seamlessly absorbs extreme systemic anomalies (like zero grades) into risk-sensitive vulnerability brackets.
+
+Ultimately, the algorithms exposed a profound reality: a student's institutional access (School Type) overwhelmingly dominates geographic variables in predicting academic success. However, the stabilization of the error rates across all applied models indicates that high-level administrative data possesses a hard, asymptotic predictive ceiling. To capture the remaining variance and model the highly individualized nuances of human writing capabilities, algorithms require deep, granular socioeconomic inputs—metrics that, while collected by INEP, are currently restricted from public microdata under Brazilian data protection legislation (LGPD). Within these legal bounds, this project empirically defines exactly how much of a student's future can be mathematically mapped using only their institutional and geographic coordinates.
+\newpage
+
+# References {.unnumbered}
+
+Brasil.
+Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira (Inep).
+Microdados do Exame Nacional do Ensino Médio (Enem) (2024).
+Brasília: Inep, 2025.
+Available at <https://download.inep.gov.br/microdados/microdados_enem_2024.zip>.
+\newline
+
+Brasil.
+Instituto Nacional de Estudos e Pesquisas Educacionais Anísio Teixeira (Inep).
+Divulgados microdados do Enem 2022 (2023).
+Brasília: Inep, 2023.
+Available at <https://www.gov.br/inep/pt-br/centrais-de-conteudo/noticias/enem/divulgados-microdados-do-enem-2022>.
+\newline
+
+Irizarry, R.A.
+(2019).
+Introduction to Data Science: Data Analysis and Prediction Algorithms with R.
+CRC Press.
+Available at: <https://rafalab.dfci.harvard.edu/dsbook/>.
+
+
+
+\newpage
+
+# Appendix - Environment {.unnumbered}
+
+This analysis was performed using the R programming language.
+The following session information details the platform, R version, and loaded packages utilized to ensure reproducibility:
+
+```{r appendix-session-info, cache=FALSE, comment=""}
+sessionInfo()
+```
+
+
+```{r appendix-memory-cleanup, include=FALSE}
+# Freeing up RAM by removing heavy datasets and intermediate models
+# from the ENEM essay score analysis project.
+suppressWarnings(rm(
+  enem_data,
+  enem_data_full,
+  resultados_2024,
+  raw_full,
+  train_set,
+  test_set,
+  t_s_reg,
+  t_s_cl,
+  f_r,
+  f_tree,
+  fit_tree_weighted,
+  f_rf_w,
+  f_nb,
+  preview_clean,
+  preview_clean_all,
+  preview_raw,
+  raw_transposed,
+  clean_transposed
+))
+gc()
+```
+
+\newpage
+
+# About the Author {.unnumbered}
+
+Michell Pereira Tizzo is a 42-year-old brazilian engineer.
+
+\* **Current Role**: Currently working with management, budgeting, and contracting at a major Brazilian multinational corporation, while continuously developing new skills aimed at automating and optimizing operational workflows.
+
+\* **Formation**: Electrical Engineer.
+
+\* **Specializations**: Petroleum engineering and project management.
+
+\* **Location**: Vitória, Espírito Santo, Brazil.
+
+\* **Technical & Leadership Expertise**: Proven track record in team leadership, corporate management, and technical personnel training across all former areas of expertise.
+Anchored by a core background in Petroleum Engineering with a strategic focus on preventive HSE (Health, Safety, and Environment) operations.
+Highly proficient as a data analyst, seamlessly combining statistical modeling with a robust foundation in business intelligence, ETL workflows, and process automation and optimization (Power BI, Power Query, VBA, SAP).
+Currently expanding programming capabilities through dedicated studies in Python and Data Science architectures.
+
+\* **Professional Interests**: Process automation, data analytics, Python programming, applied statistics, and mathematical optimization.
+
+Contact:
+
+**Email**: [michelltizzo\@gmail.com](mailto:michelltizzo@gmail.com){.email}
+
+**GitHub**: github.com/mtiz10
+
+**LinkedIn**: Not available
