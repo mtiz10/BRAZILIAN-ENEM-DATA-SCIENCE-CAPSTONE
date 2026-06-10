@@ -4,6 +4,14 @@
 # Author: MICHELL PEREIRA TIZZO
 # ========================================-
 
+# =========================================================================
+# ACADEMIC INTEGRITY & AI USE DISCLOSURE
+# In accordance with HarvardX Honor Code, a Generative AI assistant (Gemini) 
+# was used for code debugging, layout optimization, comment translation, 
+# and resolving Windows-specific file extraction issues. All core modeling, 
+# analysis, and interpretations were fully designed and written by the author.
+# =========================================================================
+
 cat("\014")
 cat("\n ======================= ")
 cat("\n STARTING MY ENEM SCRIPT ")
