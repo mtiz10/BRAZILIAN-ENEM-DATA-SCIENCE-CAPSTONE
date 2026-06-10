@@ -274,7 +274,7 @@ if (length(found_files) == 0 && !file.exists(rds_path_test) && !file.exists(rds_
     cat("\n========================================================================================\n\n")
     
     options(timeout = 3000) 
-    download.file(zip_url, destfile = zip_file, method = "libcurl", mode = "wb")
+    download.file(zip_url, destfile = zip_file, method = "wininet", mode = "wb")
     message("Download completed.")
   } else {
     message("The selected ZIP file already exists locally and is valid. Skipping download...\n")
@@ -1473,7 +1473,19 @@ Irizarry, R.A.
 Introduction to Data Science: Data Analysis and Prediction Algorithms with R.
 CRC Press.
 Available at: <https://rafalab.dfci.harvard.edu/dsbook/>.
+\newline
 
+### Use of Generative AI Assistance {.unnumbered}
+
+In compliance with the HarvardX Academic Integrity and Honor Code policies, I declare that a Generative AI assistant (Google Gemini) was utilized during the development of this project. 
+
+The AI was used strictly as a co-programmer and debugger to assist with:
+1. Translating internal R code comments and structural text headers from Portuguese to English.
+2. Resolving legacy `ggplot2` deprecated syntax warnings and optimizing visualization layouts (such as the combined Tornado plots).
+3. Structuring and formatting the dynamic LaTeX/Markdown tables to fit the PDF page layout.
+4. Designing a robust, cross-platform file extraction routine using Windows PowerShell to bypass default R unzipping limitations.
+
+All statistical decisions, machine learning model selections, data cleaning criteria, and analytical interpretations in this report were directed, verified, and authored solely by me, ensuring complete academic ownership of the final project.
 
 
 \newpage
