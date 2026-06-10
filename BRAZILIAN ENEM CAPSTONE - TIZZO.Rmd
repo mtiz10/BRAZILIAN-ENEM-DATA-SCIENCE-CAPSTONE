@@ -201,7 +201,7 @@ if (!file.exists("filtering_metadata.rds")) {
 # Locate CSV file in directory if it already exists
 found_files <- list.files(pattern = "RESULTADOS_2024.csv", recursive = TRUE, full.names = TRUE)
 
-# ======= 3 AUTOMATIC DOWNLOAD AND EXTRACTION PREPARATION ========
+# === 3 AUTOMATIC DOWNLOAD AND EXTRACTION PREPARATION ========
 if (length(found_files) == 0 && !file.exists(rds_path_test) && !file.exists(rds_path_full)) {
   dir.create("microdados_enem_2024/DADOS", recursive = TRUE, showWarnings = FALSE)
   zip_url <- "https://download.inep.gov.br/microdados/microdados_enem_2024.zip"
