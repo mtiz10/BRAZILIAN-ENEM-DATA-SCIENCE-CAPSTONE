@@ -191,6 +191,9 @@ rds_path_full <- "processed_enem_data.rds"
 rds_path_test <- "processed_enem_data_test.rds"
 csv_path <- "microdados_enem_2024/DADOS/RESULTADOS_2024.csv"
 
+
+
+
 # ======= 2 CACHE INTEGRITY ENFORCEMENT =======
 # If the metadata file does not exist, force deletion of old cache files
 # to guarantee the pipeline runs from scratch and calculates exact metrics.
@@ -198,23 +201,102 @@ if (!file.exists("filtering_metadata.rds")) {
   unlink(c(rds_path_full, rds_path_test))
 }
 
-# Locate CSV file in directory if it already exists
-found_files <- list.files(pattern = "RESULTADOS_2024.csv", recursive = TRUE, full.names = TRUE)
+# Fast direct path check to avoid slow recursive disk scanning
+default_csv_path <- "microdados_enem_2024/DADOS/RESULTADOS_2024.csv"
+sample_csv_path <- "microdados_enem_2024_sample/DADOS/RESULTADOS_2024.csv"
 
-# === 3 AUTOMATIC DOWNLOAD AND EXTRACTION PREPARATION ========
+if (file.exists(default_csv_path)) {
+  found_files <- default_csv_path
+} else if (file.exists(sample_csv_path)) {
+  found_files <- sample_csv_path
+} else {
+  # No recursive disk scanning to prevent R from hanging in high-level directories!
+  found_files <- character(0)
+}
+ 
+
+
+# ======= 3 AUTOMATIC DOWNLOAD AND EXTRACTION PREPARATION ========
 if (length(found_files) == 0 && !file.exists(rds_path_test) && !file.exists(rds_path_full)) {
   dir.create("microdados_enem_2024/DADOS", recursive = TRUE, showWarnings = FALSE)
-  zip_url <- "https://download.inep.gov.br/microdados/microdados_enem_2024.zip"
-  zip_file <- "microdados_enem_2024.zip"
   
-  message("Dataset not found. Downloading ENEM 2024 ZIP (~700MB) from INEP...")
-  options(timeout = 3000) 
-  download.file(zip_url, destfile = zip_file, mode = "wb")
+  # Interactive Dataset Selection with 10-second countdown (default to fast GitHub sample)
+  use_full_dataset <- FALSE
   
-  message("Download completed. Unzipping files...")
-  unzip(zip_file)
+  if (.Platform$OS.type == "windows") {
+    # Native Windows Popup with 10-second timeout
+    cmd <- 'powershell -Command "$wshell = New-Object -ComObject Wscript.Shell; $answer = $wshell.Popup(\\\"Would you like to download the FULL original 710MB dataset from the Brazilian Government? \n\n- Click YES to download the FULL dataset (requires ~45 min).\n- Click NO (or wait 10 seconds) to automatically download the FAST 35MB GitHub sample.\\\", 10, \\\"Dataset Selection\\\", 4 + 32); echo $answer"'
+    res <- try(system(cmd, intern = TRUE), silent = TRUE)
+    if (!inherits(res, "try-error") && length(res) > 0) {
+      # Popup return code 6 corresponds to 'Yes'
+      if (trimws(res) == "6") {
+        use_full_dataset <- TRUE
+      }
+    }
+  } else {
+    # Fallback console prompt for Unix-like systems (Linux, Mac)
+    cat("\nSelect dataset download option:\n")
+    cat("1. Download the FAST 35MB GitHub sample [Default]\n")
+    cat("2. Download the FULL 710MB Government dataset (takes ~45 min)\n")
+    ans <- readline(prompt = "Enter choice (1 or 2): ")
+    if (trimws(ans) == "2") {
+      use_full_dataset <- TRUE
+    }
+  }
   
-  found_files <- list.files(pattern = "RESULTADOS_2024.csv", recursive = TRUE, full.names = TRUE)
+  # Assign URLs and paths based on user selection
+  if (use_full_dataset) {
+    zip_url <- "https://download.inep.gov.br/microdados/microdados_enem_2024.zip"
+    zip_file <- "microdados_enem_2024.zip"
+    min_size <- 700000000 # 700 MB minimum size
+  } else {
+    zip_url <- "https://raw.githubusercontent.com/mtiz10/BRAZILIAN-ENEM-DATA-SCIENCE-CAPSTONE/main/microdados_enem_2024_sample.zip"
+    zip_file <- "microdados_enem_2024_sample.zip"
+    min_size <- 10000000 # 10 MB minimum size
+  }
+  
+  # Smart check: only download if the ZIP is missing or corrupted
+  if (!file.exists(zip_file) || file.size(zip_file) < min_size) {
+    
+    # Display the beautiful custom "Please wait..." warning box
+    cat("\n\n\n========================================================================================")
+    cat("\n|                                                                                      |")
+    cat("\n|                                                                                      |")
+    cat("\n|                                    Please wait...                                    |")
+    cat("\n|                                                                                      |")
+    if (use_full_dataset) {
+      cat("\n|  Dataset not found. Downloading ENEM 2024 ZIP (~700MB). Expected time: ~40 minutes.  |")
+    } else {
+      cat("\n|   Dataset not found. Downloading ENEM 2024 Sample ZIP (~35MB) from GitHub...         |")
+    }
+    cat("\n|                                                                                      |")
+    cat("\n|                                                                                      |")
+    cat("\n========================================================================================\n\n")
+    
+    options(timeout = 3000) 
+    download.file(zip_url, destfile = zip_file, method = "libcurl", mode = "wb")
+    message("Download completed.")
+  } else {
+    message("The selected ZIP file already exists locally and is valid. Skipping download...\n")
+  }
+  
+  message("Unzipping files...")
+  
+  # Robust Windows PowerShell extractor to avoid R's internal 2GB and multibyte limits
+  if (.Platform$OS.type == "windows") {
+    message("Using Windows PowerShell to extract the zip file...")
+    message("It will take a few more minutes...")
+    system(paste0('powershell -command "Expand-Archive -Path ', zip_file, ' -DestinationPath . -Force"'))
+  } else {
+    # Fallback for Mac/Linux
+    old_locale <- Sys.getlocale("LC_CTYPE")
+    Sys.setlocale("LC_CTYPE", "C")
+    unzip(zip_file)
+    Sys.setlocale("LC_CTYPE", old_locale)
+  }
+  
+  # Case-insensitive recursive search
+  found_files <- list.files(pattern = "RESULTADOS_2024.csv", ignore.case = TRUE, recursive = TRUE, full.names = TRUE)
   if (length(found_files) > 0) {
     csv_path <- found_files[1]
     file.remove(zip_file) 
@@ -222,6 +304,7 @@ if (length(found_files) == 0 && !file.exists(rds_path_test) && !file.exists(rds_
     stop("CRITICAL ERROR: Extraction completed, but RESULTADOS_2024.csv was not found.")
   }
 }
+
 
 # ======= 4 ROBUST RAW PREVIEW FALLBACK =====
 if (length(found_files) > 0) {
